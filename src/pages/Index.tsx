@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-import { Lock, TrendingUp } from "lucide-react";
+import { TrendingUp } from "lucide-react";
 import { RecordButton } from "@/components/RecordButton";
 import { Waveform } from "@/components/Waveform";
 import { ConfessionCard, Confession } from "@/components/ConfessionCard";
 import { NewConfessionDialog } from "@/components/NewConfessionDialog";
+import { WelcomeScreen } from "@/components/WelcomeScreen";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { AudioRecorder } from "@/lib/audioRecorder";
@@ -41,23 +42,12 @@ const Index = () => {
       checkExpiredConfessions().then(loadConfessions);
     }, 60000); // Check every minute
 
-    // Simple PIN lock simulation
-    const pin = localStorage.getItem("shadowself-pin");
-    if (!pin) {
-      const newPin = prompt("Create a 4-digit PIN to protect your confessions:");
-      if (newPin && newPin.length === 4) {
-        localStorage.setItem("shadowself-pin", newPin);
-        setIsLocked(false);
-      }
-    } else {
-      const enteredPin = prompt("Enter your PIN:");
-      if (enteredPin === pin) {
-        setIsLocked(false);
-      }
-    }
-
     return () => clearInterval(interval);
   }, []);
+
+  const handleUnlock = () => {
+    setIsLocked(false);
+  };
 
   const loadConfessions = async () => {
     const data = await getConfessions();
@@ -205,15 +195,7 @@ const Index = () => {
   };
 
   if (isLocked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <Lock className="w-16 h-16 text-muted-foreground mx-auto" />
-          <h1 className="text-2xl font-semibold">ShadowSelf is locked</h1>
-          <p className="text-muted-foreground">Your confessions are protected</p>
-        </div>
-      </div>
-    );
+    return <WelcomeScreen onUnlock={handleUnlock} />;
   }
 
   return (
