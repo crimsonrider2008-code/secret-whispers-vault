@@ -1,7 +1,18 @@
 import { useState, useEffect } from "react";
-import { Lock, Unlock } from "lucide-react";
+import { Lock, Unlock, Fingerprint } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Capacitor } from "@capacitor/core";
+import { Haptics, ImpactStyle } from "@capacitor/haptics";
+import { 
+  isBiometricAvailable, 
+  authenticateWithBiometric, 
+  isBiometricEnabled,
+  enableBiometric 
+} from "@/lib/biometric";
+import { ForgotPinDialog } from "@/components/ForgotPinDialog";
+import { SecurityQuestionDialog } from "@/components/SecurityQuestionDialog";
+import { toast } from "sonner";
 
 interface WelcomeScreenProps {
   onUnlock: () => void;
@@ -16,26 +27,75 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
   const [step, setStep] = useState<"create" | "confirm" | "enter">("enter");
   const [error, setError] = useState("");
   const [shake, setShake] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [showForgotPin, setShowForgotPin] = useState(false);
+  const [showSecurityQuestion, setShowSecurityQuestion] = useState(false);
 
   useEffect(() => {
     const existingPin = localStorage.getItem("shadowself-pin");
     
-    // Show loading animation
-    setTimeout(() => {
-      setIsLoading(false);
-      setTimeout(() => {
-        if (!existingPin) {
-          setIsCreatingPin(true);
-          setStep("create");
-        } else {
-          setStep("enter");
+    // Check biometric availability
+    const checkBiometric = async () => {
+      const available = await isBiometricAvailable();
+      setBiometricAvailable(available);
+      
+      // Auto-trigger biometric if enabled and available
+      if (available && isBiometricEnabled() && existingPin) {
+        const success = await authenticateWithBiometric();
+        if (success) {
+          onUnlock();
+          return true;
         }
-        setShowPinEntry(true);
-      }, 500);
+      }
+      return false;
+    };
+    
+    // Show loading animation
+    setTimeout(async () => {
+      const biometricSuccess = await checkBiometric();
+      
+      if (!biometricSuccess) {
+        setIsLoading(false);
+        setTimeout(() => {
+          if (!existingPin) {
+            setIsCreatingPin(true);
+            setStep("create");
+          } else {
+            setStep("enter");
+          }
+          setShowPinEntry(true);
+        }, 500);
+      }
     }, 2000);
-  }, []);
+  }, [onUnlock]);
 
-  const handlePinInput = (digit: string) => {
+  const triggerHaptic = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await Haptics.impact({ style: ImpactStyle.Light });
+      } catch (error) {
+        console.log('Haptics not available');
+      }
+    }
+  };
+
+  const handleBiometricAuth = async () => {
+    await triggerHaptic();
+    const success = await authenticateWithBiometric();
+    if (success) {
+      if (!isBiometricEnabled()) {
+        enableBiometric();
+        toast.success("Biometric authentication enabled");
+      }
+      onUnlock();
+    } else {
+      setError("Biometric authentication failed");
+      setTimeout(() => setError(""), 2000);
+    }
+  };
+
+  const handlePinInput = async (digit: string) => {
+    await triggerHaptic();
     if (step === "create") {
       if (pin.length < 4) {
         setPin(pin + digit);
@@ -49,7 +109,14 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
         if (newConfirmPin.length === 4) {
           if (newConfirmPin === pin) {
             localStorage.setItem("shadowself-pin", pin);
-            setTimeout(() => onUnlock(), 500);
+            
+            // Check if security question is set
+            const hasSecurityQuestion = localStorage.getItem("shadowself-security-answer");
+            if (!hasSecurityQuestion) {
+              setShowSecurityQuestion(true);
+            } else {
+              setTimeout(() => onUnlock(), 500);
+            }
           } else {
             setError("PINs don't match");
             setShake(true);
@@ -70,6 +137,18 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
         if (newPin.length === 4) {
           const storedPin = localStorage.getItem("shadowself-pin");
           if (newPin === storedPin) {
+            // Prompt to enable biometric if available and not already enabled
+            if (biometricAvailable && !isBiometricEnabled()) {
+              toast.success("PIN correct! Enable biometric for faster access?", {
+                action: {
+                  label: "Enable",
+                  onClick: () => {
+                    enableBiometric();
+                    toast.success("Biometric enabled");
+                  }
+                }
+              });
+            }
             setTimeout(() => onUnlock(), 500);
           } else {
             setError("Incorrect PIN");
@@ -85,7 +164,8 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
+    await triggerHaptic();
     setError("");
     if (step === "confirm") {
       setConfirmPin(confirmPin.slice(0, -1));
@@ -99,6 +179,25 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
       setStep("confirm");
       setError("");
     }
+  };
+
+  const handleForgotPin = () => {
+    setShowForgotPin(true);
+  };
+
+  const handleResetPin = (newPin: string) => {
+    localStorage.setItem("shadowself-pin", newPin);
+    setShowForgotPin(false);
+    setPin("");
+    toast.success("PIN reset successfully");
+  };
+
+  const handleSecurityQuestionSave = (question: string, answer: string) => {
+    localStorage.setItem("shadowself-security-question", question);
+    localStorage.setItem("shadowself-security-answer", answer.toLowerCase().trim());
+    setShowSecurityQuestion(false);
+    toast.success("Security question saved");
+    setTimeout(() => onUnlock(), 500);
   };
 
   const currentPin = step === "confirm" ? confirmPin : pin;
@@ -226,9 +325,33 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
                 </Button>
               )}
               {step !== "create" && (
-                <div className="h-16" />
-              )}
+              <div className="h-16" />
+            )}
             </div>
+
+            {/* Biometric Button */}
+            {biometricAvailable && step === "enter" && (
+              <Button
+                onClick={handleBiometricAuth}
+                variant="outline"
+                className="w-full gap-2 glass-effect hover:bg-primary/10"
+              >
+                <Fingerprint className="w-5 h-5" />
+                Use {Capacitor.getPlatform() === 'ios' ? 'Face ID / Touch ID' : 'Biometric'}
+              </Button>
+            )}
+
+            {/* Forgot PIN */}
+            {step === "enter" && (
+              <Button
+                onClick={handleForgotPin}
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-primary"
+              >
+                Forgot PIN?
+              </Button>
+            )}
 
             <p className="text-xs text-muted-foreground mt-4">
               Your confessions are encrypted and stored only on this device
@@ -236,6 +359,18 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
           </div>
         )}
       </div>
+
+      <ForgotPinDialog
+        open={showForgotPin}
+        onOpenChange={setShowForgotPin}
+        onReset={handleResetPin}
+      />
+
+      <SecurityQuestionDialog
+        open={showSecurityQuestion}
+        onOpenChange={setShowSecurityQuestion}
+        onSave={handleSecurityQuestionSave}
+      />
 
       <style>{`
         .delay-100 {
