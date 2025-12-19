@@ -1,4 +1,4 @@
-import { Play, Trash2, Clock } from "lucide-react";
+import { Play, Trash2, Clock, FileText } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,9 @@ export interface Confession {
   title: string;
   mood: string;
   note: string;
-  audioBlob: Blob;
+  audioBlob?: Blob;
+  textContent?: string;
+  type: 'audio' | 'text';
   createdAt: Date;
   burnAt?: Date;
   duration: number;
@@ -26,17 +28,25 @@ export const ConfessionCard = ({ confession, onPlay, onDelete }: ConfessionCardP
     ? formatDistanceToNow(confession.burnAt, { addSuffix: true })
     : null;
 
+  const isTextConfession = confession.type === 'text';
+
   return (
     <Card className="glass-effect p-4 hover:bg-secondary/50 transition-all">
       <div className="flex items-start gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onPlay}
-          className="shrink-0 w-12 h-12 rounded-full bg-primary/20 hover:bg-primary/30"
-        >
-          <Play className="w-5 h-5 text-primary fill-current" />
-        </Button>
+        {isTextConfession ? (
+          <div className="shrink-0 w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center">
+            <FileText className="w-5 h-5 text-accent" />
+          </div>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onPlay}
+            className="shrink-0 w-12 h-12 rounded-full bg-primary/20 hover:bg-primary/30"
+          >
+            <Play className="w-5 h-5 text-primary fill-current" />
+          </Button>
+        )}
 
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-2">
@@ -56,15 +66,21 @@ export const ConfessionCard = ({ confession, onPlay, onDelete }: ConfessionCardP
             </Button>
           </div>
 
+          {isTextConfession && confession.textContent && (
+            <p className="text-sm text-foreground/80 mb-2 line-clamp-3 whitespace-pre-wrap">
+              {confession.textContent}
+            </p>
+          )}
+
           {confession.note && (
-            <p className="text-sm text-muted-foreground mb-2 line-clamp-2">
+            <p className="text-sm text-muted-foreground mb-2 line-clamp-2 italic">
               {confession.note}
             </p>
           )}
 
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span>{Math.round(confession.duration)}s</span>
-            <span>•</span>
+            {!isTextConfession && <span>{Math.round(confession.duration)}s</span>}
+            {!isTextConfession && <span>•</span>}
             <span>{formatDistanceToNow(confession.createdAt, { addSuffix: true })}</span>
             {timeRemaining && (
               <>

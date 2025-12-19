@@ -9,38 +9,56 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 interface NewConfessionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  isTextMode?: boolean;
   onSave: (data: {
     title: string;
     mood: string;
     note: string;
     burnDuration: string;
+    textContent?: string;
   }) => void;
 }
 
 const MOODS = ["😔", "😢", "😤", "😰", "💔", "😌", "🤔", "😶", "🙃", "😊"];
 
-export const NewConfessionDialog = ({ open, onOpenChange, onSave }: NewConfessionDialogProps) => {
+export const NewConfessionDialog = ({ open, onOpenChange, onSave, isTextMode = false }: NewConfessionDialogProps) => {
   const [title, setTitle] = useState("");
   const [mood, setMood] = useState("😶");
   const [note, setNote] = useState("");
+  const [textContent, setTextContent] = useState("");
   const [burnDuration, setBurnDuration] = useState("never");
 
   const handleSave = () => {
-    onSave({ title, mood, note, burnDuration });
+    onSave({ title, mood, note, burnDuration, textContent: isTextMode ? textContent : undefined });
     setTitle("");
     setMood("😶");
     setNote("");
+    setTextContent("");
     setBurnDuration("never");
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="glass-effect border-border">
+      <DialogContent className="glass-effect border-border max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Save your confession</DialogTitle>
+          <DialogTitle>{isTextMode ? "Write your confession" : "Save your confession"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
+          {isTextMode && (
+            <div>
+              <Label htmlFor="textContent">Your confession</Label>
+              <Textarea
+                id="textContent"
+                value={textContent}
+                onChange={(e) => setTextContent(e.target.value)}
+                placeholder="Write what's on your mind..."
+                className="bg-secondary border-border resize-none min-h-[120px]"
+                rows={5}
+              />
+            </div>
+          )}
+
           <div>
             <Label htmlFor="title">Title (optional)</Label>
             <Input

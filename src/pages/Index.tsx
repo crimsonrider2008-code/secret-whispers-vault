@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, Mic, PenLine } from "lucide-react";
 import { RecordButton } from "@/components/RecordButton";
 import { Waveform } from "@/components/Waveform";
 import { ConfessionCard, Confession } from "@/components/ConfessionCard";
@@ -29,6 +29,8 @@ const Index = () => {
   const [currentAudioBlob, setCurrentAudioBlob] = useState<Blob | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState(true);
+  const [mode, setMode] = useState<'audio' | 'text'>('audio');
+  const [showTextDialog, setShowTextDialog] = useState(false);
   
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -119,8 +121,15 @@ const Index = () => {
     mood: string;
     note: string;
     burnDuration: string;
+    textContent?: string;
   }) => {
-    if (!currentAudioBlob) return;
+    const isTextConfession = mode === 'text' || !currentAudioBlob;
+
+    if (!isTextConfession && !currentAudioBlob) return;
+    if (isTextConfession && !data.textContent?.trim()) {
+      toast.error("Please write something first");
+      return;
+    }
 
     const burnAt = (() => {
       const now = new Date();
@@ -141,16 +150,19 @@ const Index = () => {
       title: data.title,
       mood: data.mood,
       note: data.note,
-      audioBlob: currentAudioBlob,
+      type: isTextConfession ? 'text' : 'audio',
+      audioBlob: isTextConfession ? undefined : currentAudioBlob!,
+      textContent: isTextConfession ? data.textContent : undefined,
       createdAt: new Date(),
       burnAt,
-      duration: recordingTime,
+      duration: isTextConfession ? 0 : recordingTime,
     };
 
     await saveConfession(confession);
     await loadConfessions();
     
     setShowSaveDialog(false);
+    setShowTextDialog(false);
     setCurrentAudioBlob(null);
     setRecordingTime(0);
     setAudioData([]);
@@ -216,31 +228,74 @@ const Index = () => {
         </div>
       </header>
 
-      {/* Recording Interface */}
+      {/* Mode Toggle & Recording Interface */}
       <div className="max-w-2xl mx-auto px-4 pt-8">
+        {/* Mode Toggle */}
+        <div className="flex justify-center gap-2 mb-6">
+          <Button
+            variant={mode === 'audio' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setMode('audio')}
+            className="gap-2"
+          >
+            <Mic className="w-4 h-4" />
+            Speak
+          </Button>
+          <Button
+            variant={mode === 'text' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setMode('text')}
+            className="gap-2"
+          >
+            <PenLine className="w-4 h-4" />
+            Write
+          </Button>
+        </div>
+
         <div className="glass-effect rounded-2xl p-8 mb-8">
-          <div className="h-32 mb-8">
-            <Waveform audioData={audioData} isRecording={isRecording} />
-          </div>
-
-          <div className="flex flex-col items-center gap-4">
-            <RecordButton
-              isRecording={isRecording}
-              onClick={isRecording ? stopRecording : startRecording}
-            />
-
-            <div className="text-center">
-              <div className="text-3xl font-mono text-primary mb-1">
-                {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, "0")}
+          {mode === 'audio' ? (
+            <>
+              <div className="h-32 mb-8">
+                <Waveform audioData={audioData} isRecording={isRecording} />
               </div>
-              <p className="text-sm text-muted-foreground">
-                {isRecording ? "Recording..." : "Tap to start recording"}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Maximum 60 seconds • Encrypted locally
-              </p>
+
+              <div className="flex flex-col items-center gap-4">
+                <RecordButton
+                  isRecording={isRecording}
+                  onClick={isRecording ? stopRecording : startRecording}
+                />
+
+                <div className="text-center">
+                  <div className="text-3xl font-mono text-primary mb-1">
+                    {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, "0")}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {isRecording ? "Recording..." : "Tap to start recording"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Maximum 60 seconds • Encrypted locally
+                  </p>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-6">
+              <div className="text-center">
+                <PenLine className="w-12 h-12 text-primary mx-auto mb-4 opacity-50" />
+                <p className="text-muted-foreground mb-4">
+                  Sometimes words on paper feel safer than spoken ones.
+                </p>
+              </div>
+              <Button
+                size="lg"
+                onClick={() => setShowTextDialog(true)}
+                className="gap-2"
+              >
+                <PenLine className="w-5 h-5" />
+                Start writing
+              </Button>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Timeline */}
@@ -271,6 +326,13 @@ const Index = () => {
         open={showSaveDialog}
         onOpenChange={setShowSaveDialog}
         onSave={handleSaveConfession}
+      />
+
+      <NewConfessionDialog
+        open={showTextDialog}
+        onOpenChange={setShowTextDialog}
+        onSave={handleSaveConfession}
+        isTextMode={true}
       />
 
       <Dialog open={showStatsDialog} onOpenChange={setShowStatsDialog}>
