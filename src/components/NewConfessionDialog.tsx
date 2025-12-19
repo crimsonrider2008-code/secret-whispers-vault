@@ -47,7 +47,12 @@ export const NewConfessionDialog = ({ open, onOpenChange, onSave, isTextMode = f
         <div className="space-y-4">
           {isTextMode && (
             <div>
-              <Label htmlFor="textContent">Your confession</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="textContent">Your confession</Label>
+                <span className="text-xs text-muted-foreground">
+                  {textContent.length} characters
+                </span>
+              </div>
               <Textarea
                 id="textContent"
                 value={textContent}

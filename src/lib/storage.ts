@@ -11,6 +11,7 @@ export interface Confession {
   createdAt: Date;
   burnAt?: Date;
   duration: number;
+  isPinned?: boolean;
 }
 
 interface ShadowSelfDB extends DBSchema {
@@ -36,6 +37,14 @@ export const initDB = async () => {
 export const saveConfession = async (confession: Confession) => {
   if (!db) await initDB();
   await db.put('confessions', confession);
+};
+
+export const updateConfession = async (id: string, updates: Partial<Confession>) => {
+  if (!db) await initDB();
+  const confession = await db.get('confessions', id);
+  if (confession) {
+    await db.put('confessions', { ...confession, ...updates });
+  }
 };
 
 export const getConfessions = async (): Promise<Confession[]> => {
