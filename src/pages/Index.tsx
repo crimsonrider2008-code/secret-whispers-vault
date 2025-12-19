@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from "react";
-import { TrendingUp, Mic, PenLine } from "lucide-react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { TrendingUp, Mic, PenLine, BarChart3 } from "lucide-react";
 import { RecordButton } from "@/components/RecordButton";
 import { Waveform } from "@/components/Waveform";
 import { ConfessionCard, Confession } from "@/components/ConfessionCard";
 import { NewConfessionDialog } from "@/components/NewConfessionDialog";
 import { WelcomeScreen } from "@/components/WelcomeScreen";
+import { SearchFilter, SortOption, TypeFilter } from "@/components/SearchFilter";
+import { MoodChart } from "@/components/MoodChart";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { AudioRecorder } from "@/lib/audioRecorder";
@@ -14,8 +16,10 @@ import {
   getConfessions,
   deleteConfession,
   checkExpiredConfessions,
+  updateConfession,
 } from "@/lib/storage";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const MAX_RECORDING_TIME = 60; // seconds
 
@@ -32,6 +36,12 @@ const Index = () => {
   const [mode, setMode] = useState<'audio' | 'text'>('audio');
   const [showTextDialog, setShowTextDialog] = useState(false);
   
+  // Search & Filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [moodFilter, setMoodFilter] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [sortBy, setSortBy] = useState<SortOption>('newest');
+  
   const audioRecorderRef = useRef<AudioRecorder | null>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -42,7 +52,7 @@ const Index = () => {
     loadConfessions();
     const interval = setInterval(() => {
       checkExpiredConfessions().then(loadConfessions);
-    }, 60000); // Check every minute
+    }, 60000);
 
     return () => clearInterval(interval);
   }, []);
@@ -55,6 +65,51 @@ const Index = () => {
     const data = await getConfessions();
     setConfessions(data);
   };
+
+  // Filtered and sorted confessions
+  const filteredConfessions = useMemo(() => {
+    let result = [...confessions];
+
+    // Search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(
+        (c) =>
+          c.title?.toLowerCase().includes(query) ||
+          c.note?.toLowerCase().includes(query) ||
+          c.textContent?.toLowerCase().includes(query)
+      );
+    }
+
+    // Mood filter
+    if (moodFilter) {
+      result = result.filter((c) => c.mood === moodFilter);
+    }
+
+    // Type filter
+    if (typeFilter !== 'all') {
+      result = result.filter((c) => c.type === typeFilter);
+    }
+
+    // Sorting
+    result.sort((a, b) => {
+      // Pinned items always first
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+
+      switch (sortBy) {
+        case 'oldest':
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case 'mood':
+          return a.mood.localeCompare(b.mood);
+        case 'newest':
+        default:
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+    });
+
+    return result;
+  }, [confessions, searchQuery, moodFilter, typeFilter, sortBy]);
 
   const startRecording = async () => {
     try {
@@ -156,6 +211,7 @@ const Index = () => {
       createdAt: new Date(),
       burnAt,
       duration: isTextConfession ? 0 : recordingTime,
+      isPinned: false,
     };
 
     await saveConfession(confession);
@@ -171,6 +227,8 @@ const Index = () => {
   };
 
   const handlePlay = (confession: Confession) => {
+    if (!confession.audioBlob) return;
+    
     if (playingId === confession.id) {
       audioRef.current?.pause();
       setPlayingId(null);
@@ -198,6 +256,15 @@ const Index = () => {
     toast.success("Confession deleted");
   };
 
+  const handleTogglePin = async (id: string) => {
+    const confession = confessions.find((c) => c.id === id);
+    if (confession) {
+      await updateConfession(id, { isPinned: !confession.isPinned });
+      await loadConfessions();
+      toast.success(confession.isPinned ? "Unpinned" : "Pinned to top");
+    }
+  };
+
   const getMoodStats = () => {
     const moodCounts: Record<string, number> = {};
     confessions.forEach((c) => {
@@ -216,15 +283,17 @@ const Index = () => {
       <header className="sticky top-0 z-10 glass-effect border-b border-border p-4">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <h1 className="text-xl font-semibold">ShadowSelf</h1>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowStatsDialog(true)}
-            className="gap-2"
-          >
-            <TrendingUp className="w-4 h-4" />
-            How common?
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowStatsDialog(true)}
+              className="gap-2"
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span className="hidden sm:inline">Analytics</span>
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -300,22 +369,45 @@ const Index = () => {
 
         {/* Timeline */}
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold px-2">
-            Your confessions ({confessions.length})
-          </h2>
+          <div className="flex items-center justify-between px-2">
+            <h2 className="text-lg font-semibold">
+              Your confessions ({confessions.length})
+            </h2>
+          </div>
+
+          {/* Search & Filter */}
+          {confessions.length > 0 && (
+            <SearchFilter
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              moodFilter={moodFilter}
+              onMoodFilterChange={setMoodFilter}
+              typeFilter={typeFilter}
+              onTypeFilterChange={setTypeFilter}
+              sortBy={sortBy}
+              onSortChange={setSortBy}
+            />
+          )}
           
           {confessions.length === 0 ? (
             <div className="text-center py-16 text-muted-foreground">
               <p>No confessions yet.</p>
               <p className="text-sm mt-2">Your secrets are safe here.</p>
             </div>
+          ) : filteredConfessions.length === 0 ? (
+            <div className="text-center py-16 text-muted-foreground">
+              <p>No confessions match your filters.</p>
+              <p className="text-sm mt-2">Try adjusting your search or filters.</p>
+            </div>
           ) : (
-            confessions.map((confession) => (
+            filteredConfessions.map((confession) => (
               <ConfessionCard
                 key={confession.id}
                 confession={confession}
                 onPlay={() => handlePlay(confession)}
                 onDelete={() => handleDelete(confession.id)}
+                onTogglePin={() => handleTogglePin(confession.id)}
+                isPlaying={playingId === confession.id}
               />
             ))
           )}
@@ -336,26 +428,46 @@ const Index = () => {
       />
 
       <Dialog open={showStatsDialog} onOpenChange={setShowStatsDialog}>
-        <DialogContent className="glass-effect border-border">
+        <DialogContent className="glass-effect border-border max-w-md">
           <DialogHeader>
-            <DialogTitle>How common is this?</DialogTitle>
+            <DialogTitle>Your Mood Analytics</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Your moods compared to anonymized data (your audio never leaves your device):
-            </p>
-            {getMoodStats().map(([mood, count]) => (
-              <div key={mood} className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{mood}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {Math.floor(Math.random() * 50000 + 10000).toLocaleString()} people felt this today
-                  </span>
-                </div>
-                <span className="text-sm font-medium">{count}x you</span>
+          
+          <Tabs defaultValue="chart" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="chart">Chart</TabsTrigger>
+              <TabsTrigger value="compare">Compare</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="chart" className="mt-4">
+              <MoodChart confessions={confessions} />
+            </TabsContent>
+            
+            <TabsContent value="compare" className="mt-4">
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Your moods compared to anonymized data (your audio never leaves your device):
+                </p>
+                {getMoodStats().length === 0 ? (
+                  <p className="text-center py-8 text-muted-foreground">
+                    No mood data yet
+                  </p>
+                ) : (
+                  getMoodStats().map(([mood, count]) => (
+                    <div key={mood} className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">{mood}</span>
+                        <span className="text-sm text-muted-foreground">
+                          {Math.floor(Math.random() * 50000 + 10000).toLocaleString()} people felt this today
+                        </span>
+                      </div>
+                      <span className="text-sm font-medium">{count}x you</span>
+                    </div>
+                  ))
+                )}
               </div>
-            ))}
-          </div>
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
     </div>
