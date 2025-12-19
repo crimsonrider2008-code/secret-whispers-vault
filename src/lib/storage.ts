@@ -5,7 +5,9 @@ export interface Confession {
   title: string;
   mood: string;
   note: string;
-  audioBlob: Blob;
+  audioBlob?: Blob;
+  textContent?: string;
+  type: 'audio' | 'text';
   createdAt: Date;
   burnAt?: Date;
   duration: number;
