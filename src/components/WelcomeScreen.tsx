@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Lock, Unlock, Fingerprint, Keyboard, Grid3X3 } from "lucide-react";
+import { Lock, Unlock, Fingerprint, Keyboard, Grid3X3, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Capacitor } from "@capacitor/core";
@@ -13,7 +13,7 @@ import {
 import { ForgotPinDialog } from "@/components/ForgotPinDialog";
 import { SecurityQuestionDialog } from "@/components/SecurityQuestionDialog";
 import { toast } from "sonner";
-
+import { initializeAppTimestamp } from "@/lib/deviceId";
 interface WelcomeScreenProps {
   onUnlock: () => void;
 }
@@ -65,6 +65,9 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
   }, [handleKeyDown]);
 
   useEffect(() => {
+    // Initialize app timestamp for first-time users
+    initializeAppTimestamp();
+    
     const existingPin = localStorage.getItem("shadowself-pin");
     
     // Check biometric availability
@@ -342,6 +345,12 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
               <div className="w-2 h-2 bg-primary rounded-full animate-bounce delay-100" />
               <div className="w-2 h-2 bg-primary rounded-full animate-bounce delay-200" />
             </div>
+            
+            {/* Privacy assurance during loading */}
+            <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Shield className="w-3 h-3" />
+              <span>Your data never leaves this device</span>
+            </div>
           </div>
         ) : (
           <div 
@@ -530,9 +539,17 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
               </Button>
             )}
 
-            <p className="text-xs text-muted-foreground mt-4">
-              Your confessions are encrypted and stored only on this device
-            </p>
+            {/* Enhanced privacy notice */}
+            <div className="mt-6 pt-4 border-t border-border/50 space-y-2">
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Shield className="w-3 h-3 text-primary" />
+                <span>Encrypted & stored only on this device</span>
+              </div>
+              <p className="text-xs text-muted-foreground/70 max-w-xs mx-auto">
+                No servers, no cloud, no one else can see your confessions. 
+                Your data is uniquely tied to this device only.
+              </p>
+            </div>
           </div>
         )}
       </div>
