@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { TrendingUp, Mic, PenLine, BarChart3 } from "lucide-react";
+import { TrendingUp, Mic, PenLine, BarChart3, Settings } from "lucide-react";
 import { RecordButton } from "@/components/RecordButton";
 import { Waveform } from "@/components/Waveform";
 import { ConfessionCard, Confession } from "@/components/ConfessionCard";
@@ -7,6 +7,8 @@ import { NewConfessionDialog } from "@/components/NewConfessionDialog";
 import { WelcomeScreen } from "@/components/WelcomeScreen";
 import { SearchFilter, SortOption, TypeFilter } from "@/components/SearchFilter";
 import { MoodChart } from "@/components/MoodChart";
+import { SettingsDialog } from "@/components/SettingsDialog";
+import { PrivacyBanner } from "@/components/PrivacyBanner";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { AudioRecorder } from "@/lib/audioRecorder";
@@ -30,6 +32,7 @@ const Index = () => {
   const [confessions, setConfessions] = useState<Confession[]>([]);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [showStatsDialog, setShowStatsDialog] = useState(false);
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [currentAudioBlob, setCurrentAudioBlob] = useState<Blob | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState(true);
@@ -293,6 +296,13 @@ const Index = () => {
               <BarChart3 className="w-4 h-4" />
               <span className="hidden sm:inline">Analytics</span>
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowSettingsDialog(true)}
+            >
+              <Settings className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       </header>
@@ -470,6 +480,15 @@ const Index = () => {
           </Tabs>
         </DialogContent>
       </Dialog>
+
+      <SettingsDialog
+        open={showSettingsDialog}
+        onOpenChange={setShowSettingsDialog}
+        confessionCount={confessions.length}
+        onResetComplete={() => setIsLocked(true)}
+      />
+
+      <PrivacyBanner />
     </div>
   );
 };
