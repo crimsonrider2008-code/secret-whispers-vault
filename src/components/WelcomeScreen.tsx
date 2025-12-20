@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Lock, Unlock, Fingerprint } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Lock, Unlock, Fingerprint, Keyboard, Grid3X3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Capacitor } from "@capacitor/core";
@@ -18,6 +18,8 @@ interface WelcomeScreenProps {
   onUnlock: () => void;
 }
 
+type InputMode = "numpad" | "keyboard";
+
 export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
   const [isLoading, setIsLoading] = useState(true);
   const [showPinEntry, setShowPinEntry] = useState(false);
@@ -30,6 +32,37 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [showForgotPin, setShowForgotPin] = useState(false);
   const [showSecurityQuestion, setShowSecurityQuestion] = useState(false);
+  const [inputMode, setInputMode] = useState<InputMode>("numpad");
+  
+  const keyboardInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Handle keyboard input globally
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (showForgotPin || showSecurityQuestion) return;
+    
+    // Handle number keys (both main keyboard and numpad)
+    if (/^[0-9]$/.test(e.key)) {
+      e.preventDefault();
+      handlePinInputDirect(e.key);
+    }
+    // Handle backspace/delete
+    else if (e.key === "Backspace" || e.key === "Delete") {
+      e.preventDefault();
+      handleDeleteDirect();
+    }
+    // Handle Enter for next step
+    else if (e.key === "Enter" && step === "create" && pin.length === 4) {
+      e.preventDefault();
+      handleNext();
+    }
+  }, [step, pin, confirmPin, showForgotPin, showSecurityQuestion]);
+
+  useEffect(() => {
+    // Add global keyboard listener
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
   useEffect(() => {
     const existingPin = localStorage.getItem("shadowself-pin");
@@ -94,11 +127,11 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
     }
   };
 
-  const handlePinInput = async (digit: string) => {
-    await triggerHaptic();
+  // Direct handlers for keyboard input (without haptic for better UX)
+  const handlePinInputDirect = (digit: string) => {
     if (step === "create") {
       if (pin.length < 4) {
-        setPin(pin + digit);
+        setPin(prev => prev + digit);
         setError("");
       }
     } else if (step === "confirm") {
@@ -110,7 +143,6 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
           if (newConfirmPin === pin) {
             localStorage.setItem("shadowself-pin", pin);
             
-            // Check if security question is set
             const hasSecurityQuestion = localStorage.getItem("shadowself-security-answer");
             if (!hasSecurityQuestion) {
               setShowSecurityQuestion(true);
@@ -137,7 +169,6 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
         if (newPin.length === 4) {
           const storedPin = localStorage.getItem("shadowself-pin");
           if (newPin === storedPin) {
-            // Prompt to enable biometric if available and not already enabled
             if (biometricAvailable && !isBiometricEnabled()) {
               toast.success("PIN correct! Enable biometric for faster access?", {
                 action: {
@@ -164,14 +195,23 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
     }
   };
 
-  const handleDelete = async () => {
-    await triggerHaptic();
+  const handleDeleteDirect = () => {
     setError("");
     if (step === "confirm") {
-      setConfirmPin(confirmPin.slice(0, -1));
+      setConfirmPin(prev => prev.slice(0, -1));
     } else {
-      setPin(pin.slice(0, -1));
+      setPin(prev => prev.slice(0, -1));
     }
+  };
+
+  const handlePinInput = async (digit: string) => {
+    await triggerHaptic();
+    handlePinInputDirect(digit);
+  };
+
+  const handleDelete = async () => {
+    await triggerHaptic();
+    handleDeleteDirect();
   };
 
   const handleNext = () => {
@@ -200,10 +240,82 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
     setTimeout(() => onUnlock(), 500);
   };
 
+  const toggleInputMode = () => {
+    setInputMode(prev => prev === "numpad" ? "keyboard" : "numpad");
+    // Focus the keyboard input when switching to keyboard mode
+    if (inputMode === "numpad") {
+      setTimeout(() => keyboardInputRef.current?.focus(), 100);
+    }
+  };
+
+  const handleKeyboardInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/\D/g, "").slice(0, 4);
+    
+    if (step === "confirm") {
+      setConfirmPin(value);
+      
+      if (value.length === 4) {
+        if (value === pin) {
+          localStorage.setItem("shadowself-pin", pin);
+          const hasSecurityQuestion = localStorage.getItem("shadowself-security-answer");
+          if (!hasSecurityQuestion) {
+            setShowSecurityQuestion(true);
+          } else {
+            setTimeout(() => onUnlock(), 500);
+          }
+        } else {
+          setError("PINs don't match");
+          setShake(true);
+          setTimeout(() => {
+            setPin("");
+            setConfirmPin("");
+            setStep("create");
+            setShake(false);
+          }, 1000);
+        }
+      }
+    } else if (step === "create") {
+      setPin(value);
+      setError("");
+    } else {
+      setPin(value);
+      
+      if (value.length === 4) {
+        const storedPin = localStorage.getItem("shadowself-pin");
+        if (value === storedPin) {
+          if (biometricAvailable && !isBiometricEnabled()) {
+            toast.success("PIN correct! Enable biometric for faster access?", {
+              action: {
+                label: "Enable",
+                onClick: () => {
+                  enableBiometric();
+                  toast.success("Biometric enabled");
+                }
+              }
+            });
+          }
+          setTimeout(() => onUnlock(), 500);
+        } else {
+          setError("Incorrect PIN");
+          setShake(true);
+          setTimeout(() => {
+            setPin("");
+            setShake(false);
+            setError("");
+          }, 1000);
+        }
+      }
+    }
+  };
+
   const currentPin = step === "confirm" ? confirmPin : pin;
 
   return (
-    <div className="fixed inset-0 bg-background z-50 flex items-center justify-center overflow-hidden">
+    <div 
+      ref={containerRef}
+      className="fixed inset-0 bg-background z-50 flex items-center justify-center overflow-hidden"
+      tabIndex={0}
+    >
       {/* Animated background */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl animate-pulse" />
@@ -234,7 +346,7 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
         ) : (
           <div 
             className={cn(
-              "animate-fade-in space-y-8",
+              "animate-fade-in space-y-6",
               shake && "animate-shake"
             )}
           >
@@ -261,6 +373,31 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
               </div>
             </div>
 
+            {/* Input Mode Toggle */}
+            <div className="flex justify-center gap-2">
+              <Button
+                variant={inputMode === "numpad" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setInputMode("numpad")}
+                className="gap-2"
+              >
+                <Grid3X3 className="w-4 h-4" />
+                Numpad
+              </Button>
+              <Button
+                variant={inputMode === "keyboard" ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                  setInputMode("keyboard");
+                  setTimeout(() => keyboardInputRef.current?.focus(), 100);
+                }}
+                className="gap-2"
+              >
+                <Keyboard className="w-4 h-4" />
+                Keyboard
+              </Button>
+            </div>
+
             {/* PIN Display */}
             <div className="flex justify-center gap-4">
               {[0, 1, 2, 3].map((i) => (
@@ -285,49 +422,89 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
               <p className="text-destructive text-sm animate-fade-in">{error}</p>
             )}
 
+            {/* Keyboard Mode Input */}
+            {inputMode === "keyboard" && (
+              <div className="space-y-4">
+                <div className="relative">
+                  <input
+                    ref={keyboardInputRef}
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={4}
+                    value={currentPin}
+                    onChange={handleKeyboardInputChange}
+                    placeholder="Enter 4-digit PIN"
+                    autoFocus
+                    className="w-full h-14 text-center text-2xl tracking-[1em] bg-card border-2 border-border rounded-xl focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:tracking-normal placeholder:text-sm"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Type your PIN using your keyboard or screen
+                </p>
+                {step === "create" && pin.length === 4 && (
+                  <Button
+                    onClick={handleNext}
+                    className="w-full"
+                  >
+                    Next
+                  </Button>
+                )}
+              </div>
+            )}
+
             {/* Number Pad */}
-            <div className="grid grid-cols-3 gap-3 max-w-xs mx-auto">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+            {inputMode === "numpad" && (
+              <div className="grid grid-cols-3 gap-3 max-w-xs mx-auto">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                  <Button
+                    key={num}
+                    onClick={() => handlePinInput(num.toString())}
+                    variant="outline"
+                    className="h-16 text-xl font-semibold glass-effect hover:bg-primary/10 hover:border-primary transition-all"
+                    disabled={currentPin.length >= 4}
+                  >
+                    {num}
+                  </Button>
+                ))}
                 <Button
-                  key={num}
-                  onClick={() => handlePinInput(num.toString())}
+                  onClick={handleDelete}
                   variant="outline"
-                  className="h-16 text-xl font-semibold glass-effect hover:bg-primary/10 hover:border-primary transition-all"
+                  className="h-16 glass-effect hover:bg-destructive/10 hover:border-destructive"
+                  disabled={currentPin.length === 0}
+                >
+                  Delete
+                </Button>
+                <Button
+                  onClick={() => handlePinInput("0")}
+                  variant="outline"
+                  className="h-16 text-xl font-semibold glass-effect hover:bg-primary/10 hover:border-primary"
                   disabled={currentPin.length >= 4}
                 >
-                  {num}
+                  0
                 </Button>
-              ))}
-              <Button
-                onClick={handleDelete}
-                variant="outline"
-                className="h-16 glass-effect hover:bg-destructive/10 hover:border-destructive"
-                disabled={currentPin.length === 0}
-              >
-                Delete
-              </Button>
-              <Button
-                onClick={() => handlePinInput("0")}
-                variant="outline"
-                className="h-16 text-xl font-semibold glass-effect hover:bg-primary/10 hover:border-primary"
-                disabled={currentPin.length >= 4}
-              >
-                0
-              </Button>
-              {step === "create" && (
-                <Button
-                  onClick={handleNext}
-                  variant="outline"
-                  className="h-16 glass-effect hover:bg-primary/10 hover:border-primary"
-                  disabled={pin.length !== 4}
-                >
-                  Next
-                </Button>
-              )}
-              {step !== "create" && (
-              <div className="h-16" />
+                {step === "create" && (
+                  <Button
+                    onClick={handleNext}
+                    variant="outline"
+                    className="h-16 glass-effect hover:bg-primary/10 hover:border-primary"
+                    disabled={pin.length !== 4}
+                  >
+                    Next
+                  </Button>
+                )}
+                {step !== "create" && (
+                  <div className="h-16" />
+                )}
+              </div>
             )}
-            </div>
+
+            {/* Keyboard hint for numpad mode */}
+            {inputMode === "numpad" && (
+              <p className="text-xs text-muted-foreground">
+                💡 You can also use your keyboard to type numbers
+              </p>
+            )}
 
             {/* Biometric Button */}
             {biometricAvailable && step === "enter" && (
