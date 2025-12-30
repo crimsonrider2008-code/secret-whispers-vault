@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Lock, Unlock, Fingerprint, Keyboard, Grid3X3, Shield } from "lucide-react";
+import { Lock, Unlock, Fingerprint, Keyboard, Grid3X3, Shield, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Capacitor } from "@capacitor/core";
@@ -14,11 +14,24 @@ import { ForgotPinDialog } from "@/components/ForgotPinDialog";
 import { SecurityQuestionDialog } from "@/components/SecurityQuestionDialog";
 import { toast } from "sonner";
 import { initializeAppTimestamp } from "@/lib/deviceId";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 interface WelcomeScreenProps {
   onUnlock: () => void;
 }
 
 type InputMode = "numpad" | "keyboard";
+
+const INPUT_MODES = [
+  { value: "numpad", label: "Number Pad", icon: Grid3X3, description: "Tap on-screen numbers" },
+  { value: "keyboard", label: "Keyboard", icon: Keyboard, description: "Type using your device keyboard" },
+] as const;
 
 export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
   const [isLoading, setIsLoading] = useState(true);
@@ -243,10 +256,9 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
     setTimeout(() => onUnlock(), 500);
   };
 
-  const toggleInputMode = () => {
-    setInputMode(prev => prev === "numpad" ? "keyboard" : "numpad");
-    // Focus the keyboard input when switching to keyboard mode
-    if (inputMode === "numpad") {
+  const handleInputModeChange = (mode: InputMode) => {
+    setInputMode(mode);
+    if (mode === "keyboard") {
       setTimeout(() => keyboardInputRef.current?.focus(), 100);
     }
   };
@@ -382,29 +394,47 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
               </div>
             </div>
 
-            {/* Input Mode Toggle */}
-            <div className="flex justify-center gap-2">
-              <Button
-                variant={inputMode === "numpad" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setInputMode("numpad")}
-                className="gap-2"
-              >
-                <Grid3X3 className="w-4 h-4" />
-                Numpad
-              </Button>
-              <Button
-                variant={inputMode === "keyboard" ? "default" : "outline"}
-                size="sm"
-                onClick={() => {
-                  setInputMode("keyboard");
-                  setTimeout(() => keyboardInputRef.current?.focus(), 100);
+            {/* Security Input Mode Dropdown */}
+            <div className="flex justify-center">
+              <Select 
+                value={inputMode} 
+                onValueChange={(value: InputMode) => {
+                  setInputMode(value);
+                  if (value === "keyboard") {
+                    setTimeout(() => keyboardInputRef.current?.focus(), 100);
+                  }
                 }}
-                className="gap-2"
               >
-                <Keyboard className="w-4 h-4" />
-                Keyboard
-              </Button>
+                <SelectTrigger className="w-[200px] glass-effect border-border bg-background">
+                  <div className="flex items-center gap-2">
+                    {inputMode === "numpad" ? (
+                      <Grid3X3 className="w-4 h-4" />
+                    ) : (
+                      <Keyboard className="w-4 h-4" />
+                    )}
+                    <SelectValue placeholder="Select input method" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border">
+                  {INPUT_MODES.map((mode) => (
+                    <SelectItem 
+                      key={mode.value} 
+                      value={mode.value}
+                      className="cursor-pointer"
+                    >
+                      <div className="flex flex-col items-start">
+                        <div className="flex items-center gap-2">
+                          <mode.icon className="w-4 h-4" />
+                          <span>{mode.label}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground ml-6">
+                          {mode.description}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* PIN Display */}
