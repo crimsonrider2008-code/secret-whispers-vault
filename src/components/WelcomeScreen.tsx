@@ -1,15 +1,21 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Lock, Unlock, Fingerprint, KeyRound, Shield, Hash, Scan, Eye, EyeOff } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Lock, Unlock, Fingerprint, KeyRound, Shield, Hash, Scan, Eye, EyeOff, ScanFace } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Capacitor } from "@capacitor/core";
 import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import { 
-  isBiometricAvailable, 
-  authenticateWithBiometric, 
+  isNativeBiometricAvailable,
+  isWebAuthnAvailable,
+  isMobileDevice,
+  authenticateWithNativeBiometric,
+  authenticateWithWebAuthn,
+  isFingerprintEnabled,
+  isFaceIdEnabled,
+  enableFingerprint,
+  enableFaceId,
   isBiometricEnabled,
-  enableBiometric 
 } from "@/lib/biometric";
 import { ForgotPinDialog } from "@/components/ForgotPinDialog";
 import { SecurityQuestionDialog } from "@/components/SecurityQuestionDialog";
@@ -27,7 +33,7 @@ interface WelcomeScreenProps {
   onUnlock: () => void;
 }
 
-type SecurityType = "pin" | "password" | "pattern" | "biometric";
+type SecurityType = "pin" | "password" | "pattern" | "fingerprint" | "face";
 
 interface SecurityOption {
   value: SecurityType;
@@ -45,7 +51,8 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
   const [step, setStep] = useState<"create" | "confirm" | "enter">("enter");
   const [error, setError] = useState("");
   const [shake, setShake] = useState(false);
-  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [fingerprintAvailable, setFingerprintAvailable] = useState(false);
+  const [faceIdAvailable, setFaceIdAvailable] = useState(false);
   const [showForgotPin, setShowForgotPin] = useState(false);
   const [showSecurityQuestion, setShowSecurityQuestion] = useState(false);
   
@@ -65,17 +72,17 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
   // Pattern state
   const [pattern, setPattern] = useState<number[]>([]);
   const [confirmPattern, setConfirmPattern] = useState<number[]>([]);
-  const [isDrawingPattern, setIsDrawingPattern] = useState(false);
   
   const inputRef = useRef<HTMLInputElement>(null);
   const patternRef = useRef<HTMLDivElement>(null);
 
-  // Security options
+  // Security options - Fingerprint only on mobile, Face ID on any device
   const securityOptions: SecurityOption[] = [
     { value: "pin", label: "PIN Code", icon: Hash, description: "4-digit numeric code", available: true },
     { value: "password", label: "Password", icon: KeyRound, description: "Text-based password", available: true },
     { value: "pattern", label: "Pattern", icon: Scan, description: "Draw a pattern to unlock", available: true },
-    { value: "biometric", label: "Biometric", icon: Fingerprint, description: "Face ID / Touch ID", available: biometricAvailable },
+    { value: "fingerprint", label: "Fingerprint", icon: Fingerprint, description: "Touch ID / Fingerprint (Mobile only)", available: fingerprintAvailable },
+    { value: "face", label: "Face ID", icon: ScanFace, description: "Face recognition (Any device)", available: faceIdAvailable },
   ];
 
   useEffect(() => {
@@ -86,22 +93,46 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
     const existingPattern = localStorage.getItem("shadowself-pattern");
     const existingSecurityType = localStorage.getItem("shadowself-security-type") as SecurityType | null;
     
-    const checkBiometric = async () => {
-      const available = await isBiometricAvailable();
-      setBiometricAvailable(available);
+    const checkBiometricAvailability = async () => {
+      // Check fingerprint (native mobile only)
+      const fingerprint = await isNativeBiometricAvailable();
+      setFingerprintAvailable(fingerprint && isMobileDevice());
       
-      if (available && isBiometricEnabled() && (existingPin || existingPassword || existingPattern)) {
-        const success = await authenticateWithBiometric();
-        if (success) {
-          onUnlock();
-          return true;
+      // Check Face ID (WebAuthn - any device)
+      const faceId = await isWebAuthnAvailable();
+      setFaceIdAvailable(faceId);
+      
+      return { fingerprint, faceId };
+    };
+    
+    const tryAutoUnlock = async () => {
+      const hasExistingSecurity = existingPin || existingPassword || existingPattern;
+      
+      if (hasExistingSecurity && isBiometricEnabled()) {
+        // Try fingerprint first on mobile
+        if (isFingerprintEnabled() && isMobileDevice()) {
+          const success = await authenticateWithNativeBiometric();
+          if (success) {
+            onUnlock();
+            return true;
+          }
+        }
+        
+        // Try Face ID
+        if (isFaceIdEnabled()) {
+          const success = await authenticateWithWebAuthn();
+          if (success) {
+            onUnlock();
+            return true;
+          }
         }
       }
       return false;
     };
     
     setTimeout(async () => {
-      const biometricSuccess = await checkBiometric();
+      await checkBiometricAvailability();
+      const biometricSuccess = await tryAutoUnlock();
       
       if (!biometricSuccess) {
         setIsLoading(false);
@@ -139,17 +170,28 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
     }
   };
 
-  const handleBiometricAuth = async () => {
+  const handleFingerprintAuth = async () => {
     await triggerHaptic();
-    const success = await authenticateWithBiometric();
+    const success = await authenticateWithNativeBiometric();
     if (success) {
-      if (!isBiometricEnabled()) {
-        enableBiometric();
-        toast.success("Biometric authentication enabled");
-      }
+      enableFingerprint();
+      toast.success("Fingerprint authentication enabled");
       onUnlock();
     } else {
-      setError("Biometric authentication failed");
+      setError("Fingerprint authentication failed");
+      setTimeout(() => setError(""), 2000);
+    }
+  };
+
+  const handleFaceIdAuth = async () => {
+    await triggerHaptic();
+    const success = await authenticateWithWebAuthn();
+    if (success) {
+      enableFaceId();
+      toast.success("Face ID authentication enabled");
+      onUnlock();
+    } else {
+      setError("Face ID authentication failed");
       setTimeout(() => setError(""), 2000);
     }
   };
@@ -316,13 +358,19 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
   };
 
   const offerBiometricAndUnlock = () => {
-    if (biometricAvailable && !isBiometricEnabled()) {
-      toast.success("Correct! Enable biometric for faster access?", {
+    const anyBiometricAvailable = fingerprintAvailable || faceIdAvailable;
+    
+    if (anyBiometricAvailable && !isBiometricEnabled()) {
+      const biometricType = fingerprintAvailable ? "Fingerprint" : "Face ID";
+      toast.success(`Correct! Enable ${biometricType} for faster access?`, {
         action: {
           label: "Enable",
-          onClick: () => {
-            enableBiometric();
-            toast.success("Biometric enabled");
+          onClick: async () => {
+            if (fingerprintAvailable) {
+              await handleFingerprintAuth();
+            } else if (faceIdAvailable) {
+              await handleFaceIdAuth();
+            }
           }
         }
       });
@@ -351,8 +399,12 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
   };
 
   const handleSecurityTypeChange = (type: SecurityType) => {
-    if (type === "biometric" && !biometricAvailable) {
-      toast.error("Biometric not available on this device");
+    if (type === "fingerprint" && !fingerprintAvailable) {
+      toast.error("Fingerprint only available on mobile devices");
+      return;
+    }
+    if (type === "face" && !faceIdAvailable) {
+      toast.error("Face ID not available on this device");
       return;
     }
     setSecurityType(type);
@@ -600,18 +652,34 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
               </div>
             )}
 
-            {/* Biometric as primary */}
-            {securityType === "biometric" && step === "create" && (
+            {/* Fingerprint as primary (Mobile only) */}
+            {securityType === "fingerprint" && step === "create" && (
               <div className="space-y-4">
                 <div className="p-6 glass-effect rounded-2xl">
                   <Fingerprint className="w-16 h-16 text-primary mx-auto mb-4" />
                   <p className="text-sm text-muted-foreground">
-                    Use your device's biometric authentication (Face ID / Touch ID) to secure your confessions.
+                    Use your fingerprint (Touch ID) to secure your confessions. Only available on mobile devices.
                   </p>
                 </div>
-                <Button onClick={handleBiometricAuth} className="w-full gap-2">
+                <Button onClick={handleFingerprintAuth} className="w-full gap-2">
                   <Fingerprint className="w-5 h-5" />
-                  Enable Biometric
+                  Enable Fingerprint
+                </Button>
+              </div>
+            )}
+
+            {/* Face ID as primary (Any device) */}
+            {securityType === "face" && step === "create" && (
+              <div className="space-y-4">
+                <div className="p-6 glass-effect rounded-2xl">
+                  <ScanFace className="w-16 h-16 text-primary mx-auto mb-4" />
+                  <p className="text-sm text-muted-foreground">
+                    Use Face ID / Windows Hello to secure your confessions. Works on any device with biometric support.
+                  </p>
+                </div>
+                <Button onClick={handleFaceIdAuth} className="w-full gap-2">
+                  <ScanFace className="w-5 h-5" />
+                  Enable Face ID
                 </Button>
               </div>
             )}
@@ -620,16 +688,30 @@ export const WelcomeScreen = ({ onUnlock }: WelcomeScreenProps) => {
               <p className="text-destructive text-sm animate-fade-in">{error}</p>
             )}
 
-            {/* Biometric option when entering */}
-            {biometricAvailable && step === "enter" && securityType !== "biometric" && (
-              <Button
-                onClick={handleBiometricAuth}
-                variant="outline"
-                className="w-full gap-2 glass-effect hover:bg-primary/10"
-              >
-                <Fingerprint className="w-5 h-5" />
-                Use {Capacitor.getPlatform() === 'ios' ? 'Face ID / Touch ID' : 'Biometric'} instead
-              </Button>
+            {/* Quick biometric options when entering */}
+            {step === "enter" && securityType !== "fingerprint" && securityType !== "face" && (fingerprintAvailable || faceIdAvailable) && (
+              <div className="flex gap-2">
+                {fingerprintAvailable && (
+                  <Button
+                    onClick={handleFingerprintAuth}
+                    variant="outline"
+                    className="flex-1 gap-2 glass-effect hover:bg-primary/10"
+                  >
+                    <Fingerprint className="w-5 h-5" />
+                    Fingerprint
+                  </Button>
+                )}
+                {faceIdAvailable && (
+                  <Button
+                    onClick={handleFaceIdAuth}
+                    variant="outline"
+                    className="flex-1 gap-2 glass-effect hover:bg-primary/10"
+                  >
+                    <ScanFace className="w-5 h-5" />
+                    Face ID
+                  </Button>
+                )}
+              </div>
             )}
 
             {/* Forgot PIN/Password */}
